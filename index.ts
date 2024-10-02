@@ -62,5 +62,14 @@ const server = polka()
         res.statusCode = 502;
         res.end(message);
     }
-})
-.listen(process.env.PORT || 3000);
+});
+
+(async () => {
+    if (process.env.SSL_CERT) {
+        server.server = (await import("node:https"))
+            .createServer({ key: process.env.SSL_KEY, cert: process.env.SSL_CERT });
+        server.listen(process.env.PORT || 3000);
+    } else {
+        server.listen(process.env.PORT || 3000);
+    }
+})();
