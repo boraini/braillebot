@@ -1,1 +1,2 @@
-export { Config, defaultConfig } from "./config";
+export { Config, defaultConfig } from "./config.js";
+export { downloadAndConvertImage, convertImage } from "./convert.js";

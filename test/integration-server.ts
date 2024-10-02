@@ -7,7 +7,7 @@ export function resolvePublicUrl(path: string) {
     return "http://localhost:" + port + path;
 }
 
-export async function serveStatic(path: string): Promise<polka.Polka | null> {
+export async function serveStatic(path: string): Promise<polka.Polka> {
     return new Promise(resolve => {
         const myPolka = polka().use(libServeStatic.default(path)).listen(port, "localhost", () => {
             resolve(myPolka);

@@ -15,7 +15,7 @@ describe("integration tests", () => {
             const testModule = await import(modulePath);
 
             const publicPath = path.resolve("test", ent.name, "public");
-
+            
             const publicServer = await new Promise<polka.Polka | null>(resolve => fs.stat(publicPath, (err, result) => {
                 if (!err && result.isDirectory()) {
                     serveStatic(publicPath).then(resolve);
@@ -33,9 +33,8 @@ describe("integration tests", () => {
                 err = e;
             } finally {
                 await endServeStatic(publicServer);
-
             }
-
+            
             if (err) {
                 throw err;
             }

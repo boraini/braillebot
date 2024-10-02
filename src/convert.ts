@@ -1,6 +1,7 @@
 import sharp from "sharp";
-import { Config } from "./config";
-import { quantize } from "./quantize";
+import { Config } from "./config.js";
+import { dither } from "./dither.js";
+import { autoContrast } from "./autocontrast.js";
 
 const NEWLINE = "\n";
 
@@ -42,7 +43,10 @@ export async function downloadAndConvertImage(url: string, config: Config) {
 }
 
 export async function downloadImage(url: string) {
-    return fetch(url).then(data => data.arrayBuffer()).then(b => Promise.resolve(sharp(b)));
+    return fetch(url).then(response => {
+        if (response.ok) return response.arrayBuffer();
+        return Promise.reject(new Error("Error: download status: " + response.status));
+    }).then(b => Promise.resolve(sharp(b)));
 }
 
 export async function convertImage(image: sharp.Sharp, config: Config) {
@@ -52,6 +56,9 @@ export async function convertImage(image: sharp.Sharp, config: Config) {
         throw new Error("width and height not known");
     }
 
+    // compute a new image size (numColPixels, numRowPixels) that either satisfies both
+    // the maximum number of Braille characters per row or
+    // the maximum number of pixels per row
     const ratio = Math.sqrt(config.targetPixels / (metadata.width * metadata.height));
 
     const numColPixelsWithoutLimit = ratio * metadata.width;
@@ -64,13 +71,30 @@ export async function convertImage(image: sharp.Sharp, config: Config) {
 
     const numRowPixels = Math.round(metadata.height * numColPixels / metadata.width);
 
-    const processedImage = await image.resize(numColPixels, numRowPixels).toColourspace("b-w").raw().toBuffer();
+    let processedImageImm = image;
 
-    const threshold = 127;
+    // composite transparent image over background-color background
+    processedImageImm = image.flatten({ background: { r: config.background, g: config.background, b: config.background } });
 
-    quantize(processedImage, threshold, numColPixels, numRowPixels);
+    // resize image to make it pixelated
+    processedImageImm = processedImageImm.resize(numColPixels, numRowPixels)
 
-    const numColChars = Math.ceil(numRowPixels / (config.brailleWidth + config.brailleColSpacing));
+    // make it black and white
+    processedImageImm = processedImageImm.toColourspace("b-w");
+
+    // apply the auto-contrast algorithm. This only works with black-and-white images
+    if (config.contrast > 0) {
+        processedImageImm = await autoContrast(processedImageImm, config);
+    }
+
+    // have the image on buffer for the next step
+    const processedImage = await processedImageImm.raw().toBuffer();
+
+    // dither the image to make gradients show up better
+    if (config.numDitherLevels) dither(processedImage, config.numDitherLevels, numColPixels, numRowPixels);
+
+    // convert image into Braille characters
+    const numColChars = Math.ceil(numColPixels / (config.brailleWidth + config.brailleColSpacing));
     const numRowChars = Math.ceil(numRowPixels / (config.brailleHeight + config.brailleRowSpacing));
 
     let output = "";
