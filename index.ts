@@ -1,4 +1,5 @@
 import polka from "polka";
+import fs from "node:fs";
 import {defaultConfig, Config, downloadAndConvertImage} from "./src/index.js";
 
 const customConfig: Config = {
@@ -9,7 +10,33 @@ const customConfig: Config = {
     maxRowCharacters: 30,
 };
 
+let apiKeys: string[] = [];
+
+try {
+    apiKeys = JSON.parse(fs.readFileSync("run/api-keys.json").toString());
+} catch (e) {
+    const reason = e instanceof Error ? e.message : typeof e == "string" ? e : "unknown";
+
+    console.warn("API keys could not be loaded: " + reason);
+}
+
 const server = polka()
+.use(
+    async (req, res, next) => {
+        const authorizationHeader = req.headers["authorization"];
+
+        if (
+            typeof authorizationHeader != "undefined"
+            && authorizationHeader.startsWith("Bearer")
+            && apiKeys.includes(authorizationHeader.substring("Bearer ".length).trim())
+        ) {
+            next();
+        } else {
+            res.statusCode = 401;
+            res.end("Unauthorized");
+        }
+    }
+)
 .get("/convert", async (req, res) => {
     let imageUrl: string;
 
