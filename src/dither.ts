@@ -4,12 +4,12 @@ const w3 = 5 / 16.0
 const w4 = 1 / 16.0
 
 function setPixel(im: Buffer, x: number, y: number, nx: number, ny: number, val: number) {
-    if (x < 0 || y < 0 || x >= nx || y >= nx) return;
+    if (x < 0 || y < 0 || x >= nx || y >= ny) return;
     im[y * nx + x] = val;
 }
 
 function getPixel(im: Buffer, x: number, y: number, nx: number, ny: number) {
-    if (x < 0 || y < 0 || x >= nx || y >= nx) return 0;
+    if (x < 0 || y < 0 || x >= nx || y >= ny) return 0;
     return im[y * nx + x];
 }
 
