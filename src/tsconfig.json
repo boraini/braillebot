@@ -1,0 +1,10 @@
+{
+    "extends": "..",
+    "compilerOptions": {
+        "composite": true,
+        "noUncheckedIndexedAccess": false
+    },
+    "include": [
+        "./**/*.ts"
+    ]
+}

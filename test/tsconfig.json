@@ -1,0 +1,11 @@
+{
+    "extends": "..",
+    "compilerOptions": {
+        "composite": true
+    },
+    "include": ["./**/*.ts"],
+    "references": [
+        { "path": "../src" }
+    ]
+    
+}
