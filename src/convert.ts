@@ -1,55 +1,37 @@
-import sharp from "sharp";
+import sharp, { FormatEnum } from "sharp";
 import { Config } from "./config.js";
 import { dither } from "./dither.js";
 import { autoContrast } from "./autocontrast.js";
+import { getBrailleChar } from "./braille.js";
 
 const NEWLINE = "\n";
 
-function offBounds(arr: Uint8Array, def: number, x: number, y: number, nx: number, ny: number) {
-    if (x >= 0 && y >= 0 && x < nx && y < ny) {
-        return arr[nx * y + x];
-    } else {
-        return def;
-    }
+interface Dimensions {
+    numRowPixels: number;
+    numColPixels: number;
+    numChannels: number;
+    hasAlphaChannel: boolean;
 }
 
-function threshold(bound: number, value: number) {
-    return bound < value ? 1 : 0;
-}
-
-function getBrailleChar(config: Config, arr: Uint8Array, x: number, y: number, nx: number, ny: number) {
-    const def = config.offBoundsValue;
-
-    let value = 0x2800;
-    let mult = 0;
-
-    value += threshold(127, offBounds(arr, def, x + 0, y + 0, nx, ny)) << (mult++);
-    value += threshold(127, offBounds(arr, def, x + 0, y + 1, nx, ny)) << (mult++);
-    value += threshold(127, offBounds(arr, def, x + 0, y + 2, nx, ny)) << (mult++);
-    value += threshold(127, offBounds(arr, def, x + 1, y + 0, nx, ny)) << (mult++);
-    value += threshold(127, offBounds(arr, def, x + 1, y + 1, nx, ny)) << (mult++);
-    value += threshold(127, offBounds(arr, def, x + 1, y + 2, nx, ny)) << (mult++);
-
-    if (config.brailleHeight >= 4) {
-        value += threshold(127, offBounds(arr, def, x + 0, y + 3, nx, ny)) << (mult++);
-        value += threshold(127, offBounds(arr, def, x + 1, y + 3, nx, ny)) << (mult++);
-    }
-
-    return String.fromCharCode(value);
-}
+type SharpWithDimensions = sharp.Sharp & Dimensions;
+type BufferWithDimensions = Float32Array & Dimensions;
+export type BufferAndMime = [buffer: Buffer, mime: "image/png"]
 
 export async function downloadAndConvertImage(url: string, config: Config) {
-    return downloadImage(url).then(image => convertImage(image, config));
+    return downloadImage(url)
+        .then(image => chooseDimensions(image, config))
+        .then(image => filterImage(image, config))
+        .then(image => convertPixelsToBraille(image, config))
 }
 
-export async function downloadImage(url: string) {
+export async function downloadImage(url: string): Promise<sharp.Sharp> {
     return fetch(url).then(response => {
         if (response.ok) return response.arrayBuffer();
         return Promise.reject(new Error("Error: download status: " + response.status));
     }).then(b => Promise.resolve(sharp(b)));
 }
 
-export async function convertImage(image: sharp.Sharp, config: Config) {
+export async function chooseDimensions(image: sharp.Sharp, config: Config): Promise<SharpWithDimensions> {
     const metadata = await image.metadata();
 
     if (!metadata.width || !metadata.height) {
@@ -71,27 +53,77 @@ export async function convertImage(image: sharp.Sharp, config: Config) {
 
     const numRowPixels = Math.round(metadata.height * numColPixels / metadata.width);
 
-    let processedImageImm = image;
+    const myImage: SharpWithDimensions = image as SharpWithDimensions;
 
-    // composite transparent image over background-color background
-    processedImageImm = image.flatten({ background: { r: config.background, g: config.background, b: config.background } });
+    myImage.numRowPixels = numRowPixels;
+    myImage.numColPixels = numColPixels;
+    myImage.numChannels = metadata.channels ?? 3;
+    myImage.hasAlphaChannel = !!metadata.hasAlpha;
+
+    return myImage;
+}
+
+export async function filterImage(image: SharpWithDimensions, config: Config): Promise<BufferWithDimensions> {
+    const numColPixels = image.numColPixels;
+    const numRowPixels = image.numRowPixels;
+    const numChannels = image.numChannels;
+    const hasAlphaChannel = image.hasAlphaChannel;
+    
+    let processedImageImm: sharp.Sharp = image;
 
     // resize image to make it pixelated
-    processedImageImm = processedImageImm.resize(numColPixels, numRowPixels)
+    processedImageImm = processedImageImm.resize(numColPixels, numRowPixels);
+
+    // extract alpha channel
+    let alpha = null;
+
+    if (hasAlphaChannel) {
+        await processedImageImm.clone().extractChannel("alpha").raw().toBuffer().then(a => alpha = a);
+    }
 
     // make it black and white
     processedImageImm = processedImageImm.toColourspace("b-w");
 
     // apply the auto-contrast algorithm. This only works with black-and-white images
     if (config.contrast > 0) {
-        processedImageImm = await autoContrast(processedImageImm, config);
+        processedImageImm = await autoContrast(processedImageImm, alpha, config);
     }
 
+    // composite transparent image over background-color background
+    processedImageImm = processedImageImm.flatten({ background: { r: config.background, g: config.background, b: config.background } });
+
     // have the image on buffer for the next step
-    const processedImage = await processedImageImm.raw().toBuffer();
+    const processedImage = new Float32Array((await processedImageImm.raw({ depth: "float" }).toBuffer()).buffer) as BufferWithDimensions;
 
     // dither the image to make gradients show up better
+    // note that the exported raw has only 1 channel
     if (config.numDitherLevels) dither(processedImage, config.numDitherLevels, numColPixels, numRowPixels);
+
+    processedImage.numColPixels = numColPixels;
+    processedImage.numRowPixels = numRowPixels;
+    processedImage.numChannels = numChannels;
+    processedImage.hasAlphaChannel = hasAlphaChannel;
+
+    return processedImage;
+    
+}
+
+export async function exportImageBuffer(processedImage: BufferWithDimensions): Promise<BufferAndMime> {
+    const buf = await sharp(processedImage, {
+        raw: {
+            width: processedImage.numColPixels,
+            height: processedImage.numRowPixels,
+            channels: 1,
+        },
+    }).png().toBuffer();
+
+    return [buf, "image/png"];
+}
+
+export async function convertPixelsToBraille(processedImage: BufferWithDimensions, config: Config): Promise<string> {
+    const numColPixels = processedImage.numColPixels;
+    const numRowPixels = processedImage.numRowPixels;
+    const numChannels = processedImage.numChannels;
 
     // convert image into Braille characters
     const numColChars = Math.ceil(numColPixels / (config.brailleWidth + config.brailleColSpacing));
@@ -106,7 +138,8 @@ export async function convertImage(image: sharp.Sharp, config: Config) {
                 col * (config.brailleWidth + config.brailleColSpacing),
                 row * (config.brailleHeight + config.brailleRowSpacing),
                 numColPixels,
-                numRowPixels
+                numRowPixels,
+                numChannels
             );
         }
 
@@ -114,4 +147,5 @@ export async function convertImage(image: sharp.Sharp, config: Config) {
     }
 
     return output;
+
 }

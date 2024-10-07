@@ -6,7 +6,7 @@ export default async function run() {
     const config: Config = {
         ...defaultConfig,
         contrast: 1,
-        numDitherLevels: 10,
+        numDitherLevels: 1,
         targetPixels: 200 * 200,
         maxRowCharacters: 80,
     };
@@ -14,4 +14,7 @@ export default async function run() {
     await downloadAndConvertImage(resolvePublicUrl("/testimage.jpg"), config).then(console.log);
     await downloadAndConvertImage(resolvePublicUrl("/reggie.png"), config).then(console.log);
     await downloadAndConvertImage(resolvePublicUrl("/dragon.png"), config).then(console.log);
+    await downloadAndConvertImage(resolvePublicUrl("/sigma.jpg"), config).then(console.log);
+    await downloadAndConvertImage(resolvePublicUrl("/sdv.png"), config).then(console.log);
+    await downloadAndConvertImage(resolvePublicUrl("/gecko.png"), config).then(console.log);
 }

@@ -1,11 +1,11 @@
 import polka from "polka";
 import fs from "node:fs";
-import {defaultConfig, Config, downloadAndConvertImage} from "./src/index.js";
+import { defaultConfig, Config, downloadAndConvertImage, downloadImage, filterImage, chooseDimensions, exportImageBuffer } from "./src/index.js";
 
 const customConfig: Config = {
     ...defaultConfig,
     contrast: 1,
-    numDitherLevels: 10,
+    numDitherLevels: 1,
     targetPixels: 200 * 200,
     maxRowCharacters: 30,
 };
@@ -20,9 +20,19 @@ try {
     console.warn("API keys could not be loaded: " + reason);
 }
 
-const server = polka()
-.use(
-    async (req, res, next) => {
+function findImageUrl(req: any) {
+    if (req.query["url"] instanceof String || typeof req.query["url"] == "string") {
+        return req.query["url"] as string;
+    } else {
+        throw new Error("URL not found in request");
+    }
+}
+
+const server = polka();
+
+if (apiKeys.length > 0) {
+    server
+    .use(async (req, res, next) => {
         const authorizationHeader = req.headers["authorization"];
 
         if (
@@ -35,14 +45,16 @@ const server = polka()
             res.statusCode = 401;
             res.end("Unauthorized");
         }
-    }
-)
+    });
+}
+
+server
 .get("/convert", async (req, res) => {
     let imageUrl: string;
 
-    if (req.query["url"] instanceof String || typeof req.query["url"] == "string") {
-        imageUrl = req.query["url"] as string;
-    } else {
+    try {
+        imageUrl = findImageUrl(req);
+    } catch(e) {
         res.statusCode = 400;
         res.end("Bad Request");
         return;
@@ -61,6 +73,32 @@ const server = polka()
         }
         res.statusCode = 502;
         res.end(message);
+    }
+})
+.get("/filter", async (req, res) => {
+    let imageUrl: string;
+
+    try {
+        imageUrl = findImageUrl(req);
+    } catch(e) {
+        res.statusCode = 400;
+        res.end("Bad Request");
+        return;
+    }
+
+    try {
+        const [image, mime] = await downloadImage(imageUrl)
+            .then(img => chooseDimensions(img, customConfig))
+            .then(img => filterImage(img, customConfig))
+            .then(exportImageBuffer);
+
+        res.setHeader("Content-Type", mime);
+        res.end(image);
+    } catch (e) {
+        console.error(e);
+        res.statusCode = 502;
+        res.end("Internal Server Error");
+        return;
     }
 });
 
